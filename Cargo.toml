@@ -1,10 +1,10 @@
 [package]
-name = "async_object"
-version = "0.1.2"
+name = "async_events"
+version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-description = "Async Object wrapper"
-repository = "https://github.com/milyin/async-object"
+description = "Asynchronous Events Pub/Sub Library"
+repository = "https://github.com/milyin/async-events"
 # documentation = ""
 readme = "README.md"
 
