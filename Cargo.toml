@@ -9,6 +9,8 @@ repository = "https://github.com/milyin/async-events"
 readme = "README.md"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[dependencies]
+async-std = "1.11.0"
 
 [dependencies.futures]
 version = "0.3.17"

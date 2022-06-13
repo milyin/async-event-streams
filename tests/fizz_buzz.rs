@@ -1,6 +1,7 @@
-use std::sync::mpsc::channel;
+use std::sync::{mpsc::channel, Arc};
 
-use async_object::{CArc, EArc, EventStream};
+use async_events::{EventStream, Subscribers};
+use async_std::sync::RwLock;
 use futures::{
     executor::{LocalPool, ThreadPool},
     join,
@@ -17,28 +18,32 @@ enum FizzBuzz {
     FizzBuzz,
 }
 
-struct SinkImpl {
-    values: Vec<Option<FizzBuzz>>,
+struct Sink {
+    values: RwLock<Vec<Option<FizzBuzz>>>,
 }
 
-impl SinkImpl {
+impl Sink {
     fn new() -> Self {
-        Self { values: Vec::new() }
-    }
-    fn set_value(&mut self, pos: usize, value: FizzBuzz) {
-        if pos >= self.values.len() {
-            self.values.resize(pos, None);
-            self.values.push(Some(value))
-        } else if let Some(prev) = self.values[pos] {
-            if value > prev {
-                self.values[pos] = Some(value)
-            }
-        } else {
-            self.values[pos] = Some(value)
+        Self {
+            values: RwLock::new(Vec::new()),
         }
     }
-    fn validate(&self) -> bool {
-        for (n, res) in self.values.iter().enumerate() {
+    async fn set_value(&self, pos: usize, value: FizzBuzz) {
+        let mut values = self.values.write().await;
+        if pos >= values.len() {
+            values.resize(pos, None);
+            values.push(Some(value))
+        } else if let Some(prev) = values[pos] {
+            if value > prev {
+                values[pos] = Some(value)
+            }
+        } else {
+            values[pos] = Some(value)
+        }
+    }
+    fn validate(&mut self) -> bool {
+        let values = self.values.get_mut();
+        for (n, res) in values.iter().enumerate() {
             if let Some(res) = res {
                 let expected = match (n % 5 == 0, n % 3 == 0) {
                     (true, true) => FizzBuzz::FizzBuzz,
@@ -57,27 +62,10 @@ impl SinkImpl {
 }
 
 #[derive(Clone)]
-struct Sink(CArc<SinkImpl>);
-
-impl Sink {
-    pub fn new() -> Self {
-        Sink(CArc::new(SinkImpl::new()))
-    }
-    async fn set_value(&self, pos: usize, value: FizzBuzz) -> () {
-        self.0
-            .async_call_mut(|sink| sink.set_value(pos, value))
-            .await
-    }
-    pub fn validate(&self) -> bool {
-        self.0.call(|sink| sink.validate())
-    }
-}
-
-#[derive(Clone)]
-struct Generator(EArc);
+struct Generator(Arc<Subscribers>);
 impl Generator {
     pub fn new() -> Self {
-        Generator(EArc::new())
+        Generator(Arc::new(Subscribers::new()))
     }
     fn values(&self) -> EventStream<usize> {
         self.0.create_event_stream()
@@ -87,7 +75,7 @@ impl Generator {
     }
 }
 
-async fn fizz_buzz_test(pool: impl Spawn + Clone, sink: Sink) {
+async fn fizz_buzz_test(pool: impl Spawn + Clone, sink: Arc<Sink>) {
     let mut generator = Generator::new();
     let task_nums = {
         let sink = sink.clone();
@@ -164,7 +152,7 @@ fn fizz_buzz_threadpool_async_call() {
         .create()
         .unwrap();
 
-    let sink = Sink::new();
+    let sink = Arc::new(Sink::new());
     let handle = fizz_buzz_test(pool.clone(), sink.clone());
 
     let (tx, rx) = channel();
@@ -173,17 +161,17 @@ fn fizz_buzz_threadpool_async_call() {
         tx.send(()).unwrap();
     });
     let _ = rx.recv().unwrap();
-    assert!(sink.validate());
+    assert!(Arc::try_unwrap(sink).ok().unwrap().validate());
 }
 
 #[test]
 fn fizz_buzz_locapool_sync_call() {
     let mut pool = LocalPool::new();
     let spawner = pool.spawner();
-    let sink = Sink::new();
+    let sink = Arc::new(Sink::new());
     spawner
         .spawn_local(fizz_buzz_test(spawner.clone(), sink.clone()))
         .unwrap();
     pool.run();
-    assert!(sink.validate());
+    assert!(Arc::try_unwrap(sink).ok().unwrap().validate());
 }

@@ -198,26 +198,31 @@ impl EventSubscribers {
 /// The main object which holds separate event queue for each subscriber ([EventStream] instance)
 /// and allows to send events to them
 pub struct Subscribers {
-    subscribers: HashMap<TypeId, EventSubscribers>,
+    subscribers: RwLock<HashMap<TypeId, EventSubscribers>>,
 }
 
 impl Subscribers {
     pub fn new() -> Self {
         Self {
-            subscribers: HashMap::new(),
+            subscribers: RwLock::new(HashMap::new()),
         }
     }
-    fn put_event(&mut self, event: Arc<EventBox>) {
+    fn put_event(&self, event: Arc<EventBox>) {
         // Put event to corresponding quieue only if queue exists, i.e. there are subscribers for this typ of event.
         // Otherwise just forget this event
-        if let Some(event_subscribers) = self.subscribers.get_mut(&event.get_event_id()) {
+        if let Some(event_subscribers) = self
+            .subscribers
+            .write()
+            .unwrap()
+            .get_mut(&event.get_event_id())
+        {
             event_subscribers.send_event(event)
         }
     }
 
     /// Put event to subscribers' queues and immediately return
     pub fn post_event<EVT: Send + Sync + 'static, EVTSRC: Into<Option<Arc<EventBox>>>>(
-        &mut self,
+        &self,
         event: EVT,
         source: EVTSRC,
     ) {
@@ -231,7 +236,7 @@ impl Subscribers {
     /// ```send_event``` call which earlier sent the ```EVTSRC``` event and now waiting for destroying all it's copies.
     /// See [EventOrdering](???) section
     pub fn send_event<EVT: Send + Sync + 'static, EVTSRC: Into<Option<Arc<EventBox>>>>(
-        &mut self,
+        &self,
         event: EVT,
         source: EVTSRC,
     ) -> SendEvent {
@@ -244,12 +249,12 @@ impl Subscribers {
     // Create new subscription to event of type ```EVT```. Stream's ```next()``` method retruns events sent by
     // [send_event](Subscribers::send_event) or [post_event](Subscribers::post_event) methods. When [Subscribers] object
     // is destroyed, ```next()``` returns ```None```
-    pub fn create_event_stream<EVT: Send + Sync + 'static>(&mut self) -> EventStream<EVT> {
+    pub fn create_event_stream<EVT: Send + Sync + 'static>(&self) -> EventStream<EVT> {
         let event_queue = Arc::new(RwLock::new(EventBoxQueue::new()));
         let weak_event_queue = Arc::downgrade(&mut (event_queue.clone()));
         let event_id = TypeId::of::<EVT>().into();
-        let event_subscribers = self
-            .subscribers
+        let mut subscribers = self.subscribers.write().unwrap();
+        let event_subscribers = subscribers
             .entry(event_id)
             .or_insert(EventSubscribers::new());
         event_subscribers.subscribe(weak_event_queue);
