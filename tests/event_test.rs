@@ -1,4 +1,4 @@
-use async_events::Subscribers;
+use async_events::EventQueues;
 use async_std::future::timeout;
 use async_std::task::sleep;
 use futures::stream::select;
@@ -9,7 +9,7 @@ use std::time::Duration;
 #[test]
 fn test_send_event() {
     let mut pool = LocalPool::new();
-    let subscribers = Arc::new(Subscribers::new());
+    let subscribers = Arc::new(EventQueues::new());
     // let mut numbers = subscribers.get_mut().create_event_stream::<usize>();
     let mut numbers = subscribers.create_event_stream::<usize>();
     pool.spawner()
@@ -53,9 +53,9 @@ fn test_send_event() {
 fn test_send_dependent_event() {
     let mut pool = LocalPool::new();
     {
-        let source = Arc::new(Subscribers::new());
-        let evens = Arc::new(Subscribers::new());
-        let odds = Arc::new(Subscribers::new());
+        let source = Arc::new(EventQueues::new());
+        let evens = Arc::new(EventQueues::new());
+        let odds = Arc::new(EventQueues::new());
 
         // Send source events - sequence of numbers
         pool.spawner()

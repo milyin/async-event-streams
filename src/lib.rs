@@ -1,5 +1,6 @@
 //!
-//!  This is a library for publishing/subcribing events for multiple consumers in asynchronous environment.
+//! This is a library for publishing events for multiple consumers in asynchronous environment
+//! using asynchromous streams
 //!
 
 use std::{
@@ -60,7 +61,7 @@ impl<EVT: 'static + Send + Sync> Clone for Event<EVT> {
 }
 
 /// Asychronous stream of events of specified type. The stream's ```next()``` method returns ```Some(Event<EVT>)``` while
-/// source object [Subscribers] is alive and ```None``` when it is destroyed.
+/// source object [EventQueue] is alive and ```None``` when it is destroyed.
 pub struct EventStream<EVT: Send + Sync + 'static> {
     event_queue: Arc<RwLock<EventBoxQueue>>,
     _phantom: PhantomData<EVT>,
@@ -149,44 +150,34 @@ impl<EVT: Send + Sync> EventQueue<EVT> {
     }
 }
 
-struct EventSubscribers {
-    event_subscribers: Vec<Weak<RwLock<EventBoxQueue>>>,
-}
+// Evetn queues grouped by same event id
+struct EventIdQueues(Vec<Weak<RwLock<EventBoxQueue>>>);
 
-impl Drop for EventSubscribers {
+impl Drop for EventIdQueues {
     fn drop(&mut self) {
-        self.event_subscribers.iter().for_each(|w| {
+        self.0.iter().for_each(|w| {
             w.upgrade().map(|w| w.write().ok().map(|mut w| w.detach()));
         })
     }
 }
 
-impl EventSubscribers {
+impl EventIdQueues {
     fn new() -> Self {
-        Self {
-            event_subscribers: Vec::new(),
-        }
+        Self(Vec::new())
     }
     #[allow(dead_code)]
     fn count(&self) -> usize {
-        self.event_subscribers
-            .iter()
-            .filter(|w| w.strong_count() > 0)
-            .count()
+        self.0.iter().filter(|w| w.strong_count() > 0).count()
     }
-    fn subscribe(&mut self, event_queue: Weak<RwLock<EventBoxQueue>>) {
-        if let Some(empty) = self
-            .event_subscribers
-            .iter_mut()
-            .find(|w| w.strong_count() == 0)
-        {
+    fn add_queue(&mut self, event_queue: Weak<RwLock<EventBoxQueue>>) {
+        if let Some(empty) = self.0.iter_mut().find(|w| w.strong_count() == 0) {
             *empty = event_queue;
         } else {
-            self.event_subscribers.push(event_queue);
+            self.0.push(event_queue);
         };
     }
     fn send_event(&mut self, event: Arc<EventBox>) {
-        self.event_subscribers
+        self.0
             .iter()
             .filter_map(|event_queue| event_queue.upgrade())
             .for_each(|event_queue| {
@@ -195,27 +186,18 @@ impl EventSubscribers {
     }
 }
 
-/// The main object which holds separate event queue for each subscriber ([EventStream] instance)
+/// The main object which holds queues for event subscriptions ([EventStream] instance)
 /// and allows to send events to them
-pub struct Subscribers {
-    subscribers: RwLock<HashMap<TypeId, EventSubscribers>>,
-}
+pub struct EventQueues(RwLock<HashMap<TypeId, EventIdQueues>>);
 
-impl Subscribers {
+impl EventQueues {
     pub fn new() -> Self {
-        Self {
-            subscribers: RwLock::new(HashMap::new()),
-        }
+        Self(RwLock::new(HashMap::new()))
     }
     fn put_event(&self, event: Arc<EventBox>) {
         // Put event to corresponding quieue only if queue exists, i.e. there are subscribers for this typ of event.
         // Otherwise just forget this event
-        if let Some(event_subscribers) = self
-            .subscribers
-            .write()
-            .unwrap()
-            .get_mut(&event.get_event_id())
-        {
+        if let Some(event_subscribers) = self.0.write().unwrap().get_mut(&event.get_event_id()) {
             event_subscribers.send_event(event)
         }
     }
@@ -253,26 +235,22 @@ impl Subscribers {
         let event_queue = Arc::new(RwLock::new(EventBoxQueue::new()));
         let weak_event_queue = Arc::downgrade(&mut (event_queue.clone()));
         let event_id = TypeId::of::<EVT>().into();
-        let mut subscribers = self.subscribers.write().unwrap();
-        let event_subscribers = subscribers
-            .entry(event_id)
-            .or_insert(EventSubscribers::new());
-        event_subscribers.subscribe(weak_event_queue);
+        let mut events = self.0.write().unwrap();
+        let subscribers = events.entry(event_id).or_insert(EventIdQueues::new());
+        subscribers.add_queue(weak_event_queue);
         EventStream::new(event_queue)
     }
 }
 
 /// Future returned by [send_event](Subscribers::send_event) method
-pub struct SendEvent {
-    event: Weak<EventBox>,
-}
+pub struct SendEvent(Weak<EventBox>);
 
 impl SendEvent {
     fn new(event: Weak<EventBox>) -> Self {
-        Self { event }
+        Self(event)
     }
     fn poll(&mut self, cx: &Context) -> Poll<()> {
-        if let Some(event) = self.event.upgrade() {
+        if let Some(event) = self.0.upgrade() {
             *event.waker.write().unwrap() = Some(cx.waker().clone());
             Poll::Pending
         } else {
