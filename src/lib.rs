@@ -5,7 +5,7 @@
 
 use std::{
     any::{Any, TypeId},
-    collections::{HashMap, VecDeque},
+    collections::VecDeque,
     marker::PhantomData,
     pin::Pin,
     sync::{Arc, RwLock, Weak},
@@ -60,13 +60,6 @@ impl<EVT: 'static + Send + Sync> Clone for Event<EVT> {
     }
 }
 
-/// Asychronous stream of events of specified type. The stream's ```next()``` method returns ```Some(Event<EVT>)``` while
-/// source object [EventQueue] is alive and ```None``` when it is destroyed.
-pub struct EventStream<EVT: Send + Sync + 'static> {
-    event_queue: Arc<RwLock<EventBoxQueue>>,
-    _phantom: PhantomData<EVT>,
-}
-
 /// Clonable container containing instance of specific [Event] which hides type of concrete event.
 ///
 /// The [Event] object is just typed wrapper over ```EventObject```. It goes to public interface only to allow to
@@ -110,15 +103,13 @@ impl EventBox {
     }
 }
 
-type EventBoxQueue = EventQueue<Arc<EventBox>>;
-
-struct EventQueue<EVT: Send + Sync> {
+struct EventBoxQueue {
     detached: bool,
     waker: Option<Waker>,
-    events: VecDeque<EVT>,
+    events: VecDeque<Arc<EventBox>>,
 }
 
-impl<EVT: Send + Sync> EventQueue<EVT> {
+impl EventBoxQueue {
     fn new() -> Self {
         Self {
             detached: false,
@@ -139,21 +130,29 @@ impl<EVT: Send + Sync> EventQueue<EVT> {
     fn set_waker(&mut self, waker: Waker) {
         self.waker = Some(waker)
     }
-    fn send_event(&mut self, event: EVT) {
+    fn put_event(&mut self, event: Arc<EventBox>) {
         self.events.push_back(event);
         if let Some(waker) = self.waker.take() {
             waker.wake();
         }
     }
-    fn get_event(&mut self) -> Option<EVT> {
+    fn get_event(&mut self) -> Option<Arc<EventBox>> {
         self.events.pop_front()
     }
 }
 
-// Evetn queues grouped by same event id
-struct EventIdQueues(Vec<Weak<RwLock<EventBoxQueue>>>);
+impl Drop for EventBoxQueue {
+    fn drop(&mut self) {
+        if let Some(waker) = self.waker.take() {
+            waker.wake()
+        }
+    }
+}
 
-impl Drop for EventIdQueues {
+// Evetn queues grouped by same event id
+struct EventBoxQueues(Vec<Weak<RwLock<EventBoxQueue>>>);
+
+impl Drop for EventBoxQueues {
     fn drop(&mut self) {
         self.0.iter().for_each(|w| {
             w.upgrade().map(|w| w.write().ok().map(|mut w| w.detach()));
@@ -161,7 +160,7 @@ impl Drop for EventIdQueues {
     }
 }
 
-impl EventIdQueues {
+impl EventBoxQueues {
     fn new() -> Self {
         Self(Vec::new())
     }
@@ -176,76 +175,71 @@ impl EventIdQueues {
             self.0.push(event_queue);
         };
     }
-    fn send_event(&mut self, event: Arc<EventBox>) {
+    fn put_event(&mut self, event: Arc<EventBox>) {
         self.0
             .iter()
             .filter_map(|event_queue| event_queue.upgrade())
             .for_each(|event_queue| {
-                event_queue.write().unwrap().send_event(event.clone());
+                event_queue.write().unwrap().put_event(event.clone());
             });
     }
 }
 
-/// The main object which holds queues for event subscriptions ([EventStream] instance)
-/// and allows to send events to them
-pub struct EventQueues(RwLock<HashMap<TypeId, EventIdQueues>>);
+pub struct EventStreams<EVT: Send + Sync + 'static> {
+    queues: RwLock<EventBoxQueues>,
+    _phantom: PhantomData<EVT>,
+}
 
-impl EventQueues {
+impl<EVT: Send + Sync + 'static> EventStreams<EVT> {
     pub fn new() -> Self {
-        Self(RwLock::new(HashMap::new()))
-    }
-    fn put_event(&self, event: Arc<EventBox>) {
-        // Put event to corresponding quieue only if queue exists, i.e. there are subscribers for this typ of event.
-        // Otherwise just forget this event
-        if let Some(event_subscribers) = self.0.write().unwrap().get_mut(&event.get_event_id()) {
-            event_subscribers.send_event(event)
+        let queues = RwLock::new(EventBoxQueues::new());
+        Self {
+            queues,
+            _phantom: PhantomData,
         }
     }
-
     /// Put event to subscribers' queues and immediately return
-    pub fn post_event<EVT: Send + Sync + 'static, EVTSRC: Into<Option<Arc<EventBox>>>>(
-        &self,
-        event: EVT,
-        source: EVTSRC,
-    ) {
+    pub fn post_event<EVTSRC: Into<Option<Arc<EventBox>>>>(&self, event: EVT, source: EVTSRC) {
+        let mut queues = self.queues.write().unwrap();
         let event_id = TypeId::of::<EVT>();
         let event = Arc::new(EventBox::new(event_id, Box::new(event), source.into()));
-        self.put_event(event);
+        queues.put_event(event);
     }
     /// Post event to subscribers queues and block until event is handled by all subscribers
     ///
-    /// Optional parameter EVTSRC allows to link ```EVTSRC``` to currenlty sent event. It affects behavior of
-    /// ```send_event``` call which earlier sent the ```EVTSRC``` event and now waiting for destroying all it's copies.
-    /// See [EventOrdering](???) section
-    pub fn send_event<EVT: Send + Sync + 'static, EVTSRC: Into<Option<Arc<EventBox>>>>(
+    /// Optional parameter EVTSRC allows to link ```EVTSRC``` to currenlty sent event. It affects the future object [SendEvent] returned by
+    /// ```send_event``` call which earlier sent the ```EVTSRC``` event. ```SendEvent``` is released when all subscribers handled the event and
+    /// it's [EventBox] is destroyed. So passing the ```EVTSRC``` parameters allows to delay this destruction.
+    /// See [EventOrdering](???) section for more information.
+    pub fn send_event<EVTSRC: Into<Option<Arc<EventBox>>>>(
         &self,
         event: EVT,
         source: EVTSRC,
-    ) -> SendEvent {
+    ) -> SentEvent {
+        let mut queues = self.queues.write().unwrap();
         let event_id = TypeId::of::<EVT>();
         let event = Arc::new(EventBox::new(event_id, Box::new(event), source.into()));
-        let future = SendEvent::new(Arc::downgrade(&event));
-        self.put_event(event);
+        let future = SentEvent::new(Arc::downgrade(&event));
+        queues.put_event(event);
         future
     }
-    // Create new subscription to event of type ```EVT```. Stream's ```next()``` method retruns events sent by
-    // [send_event](Subscribers::send_event) or [post_event](Subscribers::post_event) methods. When [Subscribers] object
+    // Create new subscription to event - [EventStream] object. Stream's ```next()``` method returns events sent by
+    // [send_event](Subscribers::send_event) or [post_event](Subscribers::post_event) methods. When [EventStreams] object
     // is destroyed, ```next()``` returns ```None```
-    pub fn create_event_stream<EVT: Send + Sync + 'static>(&self) -> EventStream<EVT> {
+    pub fn create_event_stream(&self) -> EventStream<EVT> {
+        let mut queues = self.queues.write().unwrap();
         let event_queue = Arc::new(RwLock::new(EventBoxQueue::new()));
         let weak_event_queue = Arc::downgrade(&mut (event_queue.clone()));
-        let event_id = TypeId::of::<EVT>().into();
-        let mut events = self.0.write().unwrap();
-        let subscribers = events.entry(event_id).or_insert(EventIdQueues::new());
-        subscribers.add_queue(weak_event_queue);
+        queues.add_queue(weak_event_queue);
         EventStream::new(event_queue)
     }
 }
 
-/// Future returned by [send_event](Subscribers::send_event) method
-pub struct SendEvent(Weak<EventBox>);
+/// Future returned by [send_event](EventStreams::send_event) method. It unlocks when all instances of sent event are
+/// dropped
+pub struct SentEvent(Weak<EventBox>);
 
-impl SendEvent {
+impl SentEvent {
     fn new(event: Weak<EventBox>) -> Self {
         Self(event)
     }
@@ -259,19 +253,18 @@ impl SendEvent {
     }
 }
 
-impl Future for SendEvent {
+impl Future for SentEvent {
     type Output = ();
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<<Self as Future>::Output> {
         self.get_mut().poll(cx)
     }
 }
 
-impl<EVT: Send + Sync> Drop for EventQueue<EVT> {
-    fn drop(&mut self) {
-        if let Some(waker) = self.waker.take() {
-            waker.wake()
-        }
-    }
+/// Asychronous stream of events of specified type. The stream's ```next()``` method returns ```Some(Event<EVT>)``` while
+/// source object [EventQueue] is alive and ```None``` when it is destroyed.
+pub struct EventStream<EVT: Send + Sync + 'static> {
+    event_queue: Arc<RwLock<EventBoxQueue>>,
+    _phantom: PhantomData<EVT>,
 }
 
 impl<EVT: Send + Sync + 'static> EventStream<EVT> {

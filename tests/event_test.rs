@@ -1,4 +1,4 @@
-use async_events::EventQueues;
+use async_events::EventStreams;
 use async_std::future::timeout;
 use async_std::task::sleep;
 use futures::stream::select;
@@ -9,18 +9,13 @@ use std::time::Duration;
 #[test]
 fn test_send_event() {
     let mut pool = LocalPool::new();
-    let subscribers = Arc::new(EventQueues::new());
-    // let mut numbers = subscribers.get_mut().create_event_stream::<usize>();
-    let mut numbers = subscribers.create_event_stream::<usize>();
+    let subscribers = EventStreams::new();
+    let mut numbers = subscribers.create_event_stream();
     pool.spawner()
         .spawn_local(async move {
             subscribers.send_event(1 as usize, None).await;
             subscribers.send_event(2 as usize, None).await;
             subscribers.send_event(3 as usize, None).await;
-            // last copy of subscribers is dropped here, make sure of it
-            let wsubscribers = Arc::downgrade(&subscribers);
-            drop(subscribers);
-            assert!(wsubscribers.upgrade().is_none());
         })
         .unwrap();
     pool.spawner()
@@ -53,9 +48,9 @@ fn test_send_event() {
 fn test_send_dependent_event() {
     let mut pool = LocalPool::new();
     {
-        let source = Arc::new(EventQueues::new());
-        let evens = Arc::new(EventQueues::new());
-        let odds = Arc::new(EventQueues::new());
+        let source = Arc::new(EventStreams::new());
+        let evens = Arc::new(EventStreams::new());
+        let odds = Arc::new(EventStreams::new());
 
         // Send source events - sequence of numbers
         pool.spawner()
@@ -73,7 +68,7 @@ fn test_send_dependent_event() {
         pool.spawner()
             .spawn_local({
                 let evens = evens.clone();
-                let mut src = source.create_event_stream::<usize>();
+                let mut src = source.create_event_stream();
                 async move {
                     while let Some(en) = src.next().await {
                         let n = *en.as_ref();
@@ -95,7 +90,7 @@ fn test_send_dependent_event() {
         pool.spawner()
             .spawn_local({
                 let odds = odds.clone();
-                let mut src = source.create_event_stream::<usize>();
+                let mut src = source.create_event_stream();
                 async move {
                     while let Some(en) = src.next().await {
                         let n = *en.as_ref();
@@ -111,8 +106,8 @@ fn test_send_dependent_event() {
 
         pool.spawner()
             .spawn_local({
-                let evens = evens.create_event_stream::<usize>();
-                let odds = odds.create_event_stream::<usize>();
+                let evens = evens.create_event_stream();
+                let odds = odds.create_event_stream();
                 let mut ns = select(evens, odds);
                 async move {
                     timeout(Duration::from_secs(5), async move {

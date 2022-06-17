@@ -1,6 +1,6 @@
 use std::sync::{mpsc::channel, Arc};
 
-use async_events::{EventQueues, EventStream};
+use async_events::{EventStreams, EventStream};
 use async_std::sync::RwLock;
 use futures::{
     executor::{LocalPool, ThreadPool},
@@ -62,10 +62,10 @@ impl Sink {
 }
 
 #[derive(Clone)]
-struct Generator(Arc<EventQueues>);
+struct Generator(Arc<EventStreams<usize>>);
 impl Generator {
     pub fn new() -> Self {
-        Generator(Arc::new(EventQueues::new()))
+        Generator(Arc::new(EventStreams::new()))
     }
     fn values(&self) -> EventStream<usize> {
         self.0.create_event_stream()
