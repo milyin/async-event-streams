@@ -1,6 +1,69 @@
 //!
-//! This is a library for publishing events for multiple consumers in asynchronous environment
+//! Async-events is a library for publishing events for multiple consumers in asynchronous environment
 //! using asynchromous streams
+//!
+//! # Usage sample
+//!
+//! ```
+//! use futures::{executor::LocalPool, task::LocalSpawnExt, StreamExt};
+//! use async_events::EventStreams;
+//!
+//! let mut pool = LocalPool::new();
+//!
+//! let streams = EventStreams::new();
+//! let mut stream = streams.create_event_stream();
+//!
+//! let sender_task = async move {
+//!     assert!(streams.count() == 1);
+//!     streams.send_event(42, None).await;
+//!     streams.send_event(451, None).await;
+//!     streams.send_event(1984, None).await;
+//! };
+//!
+//! let receiver_task = async move {
+//!     let mut values = Vec::new();
+//!     while let Some(event) = stream.next().await {
+//!         values.push(*event.as_ref());
+//!     }
+//!     // next() returns none when 'streams' is dropped
+//!     assert!(values == vec![42, 451, 1984]);
+//! };
+//!
+//! pool.spawner().spawn_local(sender_task);
+//! pool.spawner().spawn_local(receiver_task);
+//! pool.run();
+//! ```
+//!
+//! # Event ordering
+//!
+//! Each subcriber (subscriber = asyncrhonous task reading event stream) uses it's own instance of event stream. Streams are fed by 'send_event'
+//! and when event is sent each subscriber may pick it at different moments. I.e. when events A and B are sent, one subscriber may handle
+//! both while another subscriber haven't handled any. That means that B is handled by subscriber 1 earlier than A is handled by subscriber 2.
+//! Sometimes this is not desirable.
+//!
+//! This problem is solved by reference-counting Event wrapper for actual events. All suscribers revceives clone of same Event. The asynchronous
+//! send_event method is blocked hold until all these clones are dropped. This allows to pause before sending next event until the moment when
+//! previous event is fully processed by subscribers.
+//!
+//! If it's enough to just send event and forget about it, post_event method may be used.
+//!
+//! Event subscribers may fire other events. For example we may have mouse click handler which sends button press events if click
+//! occurs on the button. It may be important to guarantee that button click events are not handled in order different than mouse clicks order.
+//!
+//! For example consider two buttons A and B, both subscribed to mouse events C, each in it's own task. Click event C1 causes button A send press
+//! event P1, click C2 causes button B send press event P2. It's guaranteed that send_enent(C2) occures only when all instances of C1 are destroyed.
+//! So it's guaranteed that P2 is *sent* after P1 (because P2 is reaction to C2, which appears in stream only after all subscribers processed C1).
+//!
+//! But there is still no guarantee that P2 is *handled* after P1. They are sent from independent streams and it's easy to imagine situation when
+//! some subscriber for A button is frozen and handles his istance of P1 event long after the moment when B subsciber already handled P2.
+//!
+//! This may be inappropriate. For example: user presses "Apply" button and then "Close" button in the dialog. "Close" button is handled earler,
+//! than "Apply". It's subscriber destroys the whole dialog. "Apply"'s subcriber have nothing to do. User's data is lost.
+//!
+//! To avoid this the concept of "source" event is added. The functions send_event and post_event have the additional optional parameter -
+//! event which caused the sent one. Reference to this 'source' event is saved inside Event wrapper of new event and therefore send_event which
+//! sent this source event is blocked until all derived events are dropped. So C2 click in example above is sent only when all instances of P1
+//! are destroyed. So click on "Close" button is sent only after "Apply" press button event is handled.  
 //!
 
 use std::{
@@ -164,7 +227,6 @@ impl EventBoxQueues {
     fn new() -> Self {
         Self(Vec::new())
     }
-    #[allow(dead_code)]
     fn count(&self) -> usize {
         self.0.iter().filter(|w| w.strong_count() > 0).count()
     }
@@ -197,6 +259,10 @@ impl<EVT: Send + Sync + 'static> EventStreams<EVT> {
             queues,
             _phantom: PhantomData,
         }
+    }
+    /// Return number of subscribers
+    pub fn count(&self) -> usize {
+        self.queues.read().unwrap().count()
     }
     /// Put event to subscribers' queues and immediately return
     pub fn post_event<EVTSRC: Into<Option<Arc<EventBox>>>>(&self, event: EVT, source: EVTSRC) {

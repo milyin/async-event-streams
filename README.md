@@ -7,28 +7,24 @@ examples. Also this library is used in experimental Wingows GUI libray [WAG](htt
 
 # Example
 
-This code makes wrappers Background and WBackground for BackgroundImpl object. Internally they are just
-Arc\<Rwlock\<BackgroundImpl\>\> and Weak\<Rwlock\<BackgroundImpl\>\> plus tooling for access the Rwlock without blocking
-asyncronous job.
-
 ```
 enum ButtonEvent { Press, Release }
 
 struct Button {
-    events: Events
+    events: EventStreams<ButtonEvent>
 }
 
 impl Button {
     async pub fn press(&mut self) {
-        self.send_event(ButtonEvent::Press).await
+        self.events.send_event(ButtonEvent::Press).await
     }
     pub fn events(&self) -> EventStream<ButtonEvent> {
-        self.create_event_stream()
+        self.events.create_event_stream()
     }
 }
 ```
 
-Below is the code which changes background color when button is pressed
+Here is the code which changes background color when button is pressed
 
 ```
 let pool = ThreadPool::builder().create().unwrap();
