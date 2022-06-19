@@ -1,6 +1,5 @@
 //!
-//! Async-events is a library for publishing events for multiple consumers in asynchronous environment
-//! using asynchromous streams
+//! Library for publishing events for multiple consumers using asynchromous streams
 //!
 //! # Usage sample
 //!
@@ -34,36 +33,36 @@
 //! pool.run();
 //! ```
 //!
-//! # Event ordering
+//! # Event processing order
 //!
-//! Each subcriber (subscriber = asyncrhonous task reading event stream) uses it's own instance of event stream. Streams are fed by 'send_event'
-//! and when event is sent each subscriber may pick it at different moments. I.e. when events A and B are sent, one subscriber may handle
-//! both while another subscriber haven't handled any. That means that B is handled by subscriber 1 earlier than A is handled by subscriber 2.
-//! Sometimes this is not desirable.
+//! When event is sent it becomes immediately available for all [EventStream] objects.
+//! Events covmes from stream exactly in order as they being sent. But between streams this order is not guaranteed.
+//! Though it may be necessary to ensure that events are handled in order globally. I.e. for async tasks A and B the events E1,E2,E3 should be processed
+//! in order A(E1), B(E1), B(E2), A(E2), B(E3), A(E3), but not in order A(E1), A(E2), A(E3), B(E1), B(E2), B(E3).
 //!
-//! This problem is solved by reference-counting Event wrapper for actual events. All suscribers revceives clone of same Event. The asynchronous
-//! send_event method is blocked hold until all these clones are dropped. This allows to pause before sending next event until the moment when
-//! previous event is fully processed by subscribers.
+//! To achieve this the [send_event](EventStreams::send_event) function returns future [SentEvent]. Each [EventStream] instance receives clone
+//! of [Event<T>](Event) object. When all these clones are dropped the ```SentEvent``` future is released. This guarantees that E2 is sent only
+//! when E1 has been processed by all subscribers.
 //!
-//! If it's enough to just send event and forget about it, post_event method may be used.
+//! If such blocking until is not necessary, the [post_event](EventStreams::post_event) can be used instead.
 //!
-//! Event subscribers may fire other events. For example we may have mouse click handler which sends button press events if click
-//! occurs on the button. It may be important to guarantee that button click events are not handled in order different than mouse clicks order.
+//! # Dependent Events
 //!
-//! For example consider two buttons A and B, both subscribed to mouse events C, each in it's own task. Click event C1 causes button A send press
-//! event P1, click C2 causes button B send press event P2. It's guaranteed that send_enent(C2) occures only when all instances of C1 are destroyed.
-//! So it's guaranteed that P2 is *sent* after P1 (because P2 is reaction to C2, which appears in stream only after all subscribers processed C1).
+//! Receiving events may cause firing new events. For example button's mouse click handler is sending button press events.
+//! It may be important to guarantee that button click events are not handled in order different than mouse clicks order.
 //!
-//! But there is still no guarantee that P2 is *handled* after P1. They are sent from independent streams and it's easy to imagine situation when
-//! some subscriber for A button is frozen and handles his istance of P1 event long after the moment when B subsciber already handled P2.
+//! For example consider two buttons A and B. Click event C1 causes button A send press
+//! event P1, click C2 causes button B send press event P2. It's guaranteed that P2 is *sent* after P1 (because P1 is reaction to C1,
+//! P2 is reaction to C2, and both C1 and C2 comes from same ```send_event```).  But there is still no guarantee that P2 is *processed* after P1,
+//! because P1 and P2 arrives from different sources.
 //!
-//! This may be inappropriate. For example: user presses "Apply" button and then "Close" button in the dialog. "Close" button is handled earler,
-//! than "Apply". It's subscriber destroys the whole dialog. "Apply"'s subcriber have nothing to do. User's data is lost.
+//! This may be inappropriate. For example: user clicks "Apply" button and then "Close" button. "Close" button press event is processed
+//! before "Apply". "Close" handler destroys the whole dialog, "Apply" is not handled, user's data is lost.
 //!
-//! To avoid this the concept of "source" event is added. The functions send_event and post_event have the additional optional parameter -
-//! event which caused the sent one. Reference to this 'source' event is saved inside Event wrapper of new event and therefore send_event which
-//! sent this source event is blocked until all derived events are dropped. So C2 click in example above is sent only when all instances of P1
-//! are destroyed. So click on "Close" button is sent only after "Apply" press button event is handled.  
+//! To avoid this the concept of "source" event is added. [send_event](EventStreams::send_event) and [post_event](EventStreams::post_event) have
+//! the additional optional parameter - event which caused the sent one. Reference to this 'source' event is saved inside Event wrapper of new event
+//! and therefore source ```send_event``` is blocked until all derived events are dropped. So click to "Close" in example above is not sent until
+//! "Apply" handler finishes.
 //!
 
 use std::{
@@ -77,17 +76,10 @@ use std::{
 
 use futures::{Future, Stream};
 
-/// Container for event. The main purpose of this container is to ensure correct order of events.
-/// Asyncronous send_event function finishes only when all copies of Event are destroyed. This allows to guarantee
-/// that sent event have been processed by all handlers by the moment when send_event returns.
+/// Reference-counting container with event. Each [EventStream] instance receives clone of ```Event<T>``` referencing the same instance of ```T```.
+/// When all instances of ```Event<T>``` are dropped, the [SentEvent] future returned by [send_event](EventStreams::send_event) is released.
 ///
-/// ```Event``` object is created as output of [EventStream]. There is no other way to create it.
-///
-/// Function which handles ```Event``` object may produce new events by calling [send_event](EArc::send_event). Sometimes it's necessary to
-/// ensure that these derived events are handled before new instance of source event is produced. For example if mouse
-/// click produces button press event, we have to be sure that button press event is handled before next mouse click arrives.
-/// To do it the second parameter ```source``` of ```send_event``` is used. Reference to source event is stored into sent event.
-///
+/// ```Event<T>``` object is acquired from [EventStream] only.
 pub struct Event<EVT: 'static + Send + Sync> {
     event_box: Arc<EventBox>,
     _phantom: PhantomData<EVT>,
@@ -123,10 +115,8 @@ impl<EVT: 'static + Send + Sync> Clone for Event<EVT> {
     }
 }
 
-/// Clonable container containing instance of specific [Event] which hides type of concrete event.
-///
-/// The [Event] object is just typed wrapper over ```EventObject```. It goes to public interface only to allow to
-/// simplify [send_event](Subcribers::send_event) method - erase type of it's ```source```parameter which actually doesn't matter
+/// Clonable container with instance of event which hides type of event.
+/// The [Event] object is just typed wrapper over ```EventObject```.
 pub struct EventBox {
     event_id: TypeId,
     event: Box<dyn Any + Send + Sync>,
@@ -212,7 +202,6 @@ impl Drop for EventBoxQueue {
     }
 }
 
-// Evetn queues grouped by same event id
 struct EventBoxQueues(Vec<Weak<RwLock<EventBoxQueue>>>);
 
 impl Drop for EventBoxQueues {
@@ -247,6 +236,7 @@ impl EventBoxQueues {
     }
 }
 
+/// Main object which allows to send events and subscribe to them
 pub struct EventStreams<EVT: Send + Sync + 'static> {
     queues: RwLock<EventBoxQueues>,
     _phantom: PhantomData<EVT>,
@@ -264,19 +254,26 @@ impl<EVT: Send + Sync + 'static> EventStreams<EVT> {
     pub fn count(&self) -> usize {
         self.queues.read().unwrap().count()
     }
-    /// Put event to subscribers' queues and immediately return
+    /// Put event to streams and immediately return
+    ///
+    /// Parameters:
+    ///
+    /// - ```event``` - event itself
+    /// - ```source``` - optional parameter with event which was the cause of ```event```. See [Dependent Events](#dependent-events) section for details
+    ///
     pub fn post_event<EVTSRC: Into<Option<Arc<EventBox>>>>(&self, event: EVT, source: EVTSRC) {
         let mut queues = self.queues.write().unwrap();
         let event_id = TypeId::of::<EVT>();
         let event = Arc::new(EventBox::new(event_id, Box::new(event), source.into()));
         queues.put_event(event);
     }
-    /// Post event to subscribers queues and block until event is handled by all subscribers
+    /// Put event to streams and return future whcih blocks until event is handled by all subscribers
     ///
-    /// Optional parameter EVTSRC allows to link ```EVTSRC``` to currenlty sent event. It affects the future object [SendEvent] returned by
-    /// ```send_event``` call which earlier sent the ```EVTSRC``` event. ```SendEvent``` is released when all subscribers handled the event and
-    /// it's [EventBox] is destroyed. So passing the ```EVTSRC``` parameters allows to delay this destruction.
-    /// See [EventOrdering](???) section for more information.
+    /// Parameters:
+    ///
+    /// - ```event``` - event itself
+    /// - ```source``` - optional parameter with event which was the cause of ```event```. See [Dependent Events](#dependent-events) section for details
+    ///
     pub fn send_event<EVTSRC: Into<Option<Arc<EventBox>>>>(
         &self,
         event: EVT,
@@ -290,7 +287,7 @@ impl<EVT: Send + Sync + 'static> EventStreams<EVT> {
         future
     }
     // Create new subscription to event - [EventStream] object. Stream's ```next()``` method returns events sent by
-    // [send_event](Subscribers::send_event) or [post_event](Subscribers::post_event) methods. When [EventStreams] object
+    // [send_event](EventStreams::send_event) or [post_event](EventStreams::post_event) methods. When [EventStreams] object
     // is destroyed, ```next()``` returns ```None```
     pub fn create_event_stream(&self) -> EventStream<EVT> {
         let mut queues = self.queues.write().unwrap();
@@ -301,7 +298,7 @@ impl<EVT: Send + Sync + 'static> EventStreams<EVT> {
     }
 }
 
-/// Future returned by [send_event](EventStreams::send_event) method. It unlocks when all instances of sent event are
+/// Future returned by [send_event](EventStreams::send_event) method. ```await``` on it locks until all instances of sent event are
 /// dropped
 pub struct SentEvent(Weak<EventBox>);
 
@@ -327,7 +324,7 @@ impl Future for SentEvent {
 }
 
 /// Asychronous stream of events of specified type. The stream's ```next()``` method returns ```Some(Event<EVT>)``` while
-/// source object [EventQueue] is alive and ```None``` when it is destroyed.
+/// source object [EventStreams] is alive and ```None``` when it is destroyed.
 pub struct EventStream<EVT: Send + Sync + 'static> {
     event_queue: Arc<RwLock<EventBoxQueue>>,
     _phantom: PhantomData<EVT>,
