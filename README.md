@@ -2,8 +2,8 @@
 
 Library for publishing events for multiple consumers using asynchromous streams
 
-Library provides [EventStreams<T: 'static + Send + Sync>](EventStreams) object which translates events of type ```T``` 
-to arbitrary number of [EventStream] objects, which implements standard [futures::Stream] interface
+Library provides ```EventStreams<T: 'static + Send + Sync>``` object which translates events of type ```T``` 
+to arbitrary number of ```EventStream``` objects, which implements standard ```futures::Stream``` interface
 
 ## Usage example
 
