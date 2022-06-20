@@ -1,4 +1,4 @@
-# Async Events
+# Async Event Streams
 
 Library for publishing events for multiple consumers using asynchromous streams
 

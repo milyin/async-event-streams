@@ -1,4 +1,4 @@
-use async_events::EventStreams;
+use async_event_streams::EventStreams;
 use async_std::future::timeout;
 use async_std::task::sleep;
 use futures::stream::select;

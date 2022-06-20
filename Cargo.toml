@@ -1,10 +1,10 @@
 [package]
-name = "async_events"
+name = "async_event_streams"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "Asynchronous Events Pub/Sub Library"
-repository = "https://github.com/milyin/async-events"
+repository = "https://github.com/milyin/async-event-streams"
 # documentation = ""
 readme = "README.md"
 

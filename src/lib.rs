@@ -5,7 +5,7 @@
 //!
 //! ```
 //! use futures::{executor::LocalPool, task::LocalSpawnExt, StreamExt};
-//! use async_events::EventStreams;
+//! use async_event_streams::EventStreams;
 //!
 //! let mut pool = LocalPool::new();
 //!
@@ -35,9 +35,9 @@
 //!
 //! # Event processing order
 //!
-//! When event is sent it becomes immediately available for all [EventStream] objects.
+//! When event is put to [EventStreams] it becomes immediately available for all [EventStream] objects, created by this ```EventStreams```.
 //! Events covmes from stream exactly in order as they being sent. But between streams this order is not guaranteed.
-//! Though it may be necessary to ensure that events are handled in order globally. I.e. for async tasks A and B the events E1,E2,E3 should be processed
+//! Though sometimes it is necessary to ensure that events are handled in order globally. I.e. for async tasks A and B the events E1,E2,E3 should be processed
 //! in order A(E1), B(E1), B(E2), A(E2), B(E3), A(E3), but not in order A(E1), A(E2), A(E3), B(E1), B(E2), B(E3).
 //!
 //! To achieve this the [send_event](EventStreams::send_event) function returns future [SentEvent]. Each [EventStream] instance receives clone

@@ -1,6 +1,6 @@
 use std::sync::{mpsc::channel, Arc};
 
-use async_events::{EventStreams, EventStream};
+use async_event_streams::{EventStream, EventStreams};
 use async_std::sync::RwLock;
 use futures::{
     executor::{LocalPool, ThreadPool},
