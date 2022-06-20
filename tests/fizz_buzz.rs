@@ -82,7 +82,7 @@ async fn fizz_buzz_test(pool: impl Spawn + Clone, sink: Arc<Sink>) {
         let mut values = generator.values();
         pool.spawn_with_handle(async move {
             while let Some(n) = values.next().await {
-                let n = *n.as_ref();
+                let n = *n;
                 sink.set_value(n, FizzBuzz::Number).await
             }
         })
@@ -93,7 +93,7 @@ async fn fizz_buzz_test(pool: impl Spawn + Clone, sink: Arc<Sink>) {
         let mut values = generator.values();
         pool.spawn_with_handle(async move {
             while let Some(n) = values.next().await {
-                let n = *n.as_ref();
+                let n = *n;
                 if n % 3 == 0 {
                     sink.set_value(n, FizzBuzz::Fizz).await
                 }
@@ -106,7 +106,7 @@ async fn fizz_buzz_test(pool: impl Spawn + Clone, sink: Arc<Sink>) {
         let mut values = generator.values();
         pool.spawn_with_handle(async move {
             while let Some(n) = values.next().await {
-                let n = *n.as_ref();
+                let n = *n;
                 if n % 5 == 0 {
                     tsink.set_value(n, FizzBuzz::Buzz).await
                 }
@@ -119,7 +119,7 @@ async fn fizz_buzz_test(pool: impl Spawn + Clone, sink: Arc<Sink>) {
         let mut values = generator.values();
         pool.spawn_with_handle(async move {
             while let Some(n) = values.next().await {
-                let n = *n.as_ref();
+                let n = *n;
                 if n % 5 == 0 && n % 3 == 0 {
                     tsink.set_value(n, FizzBuzz::FizzBuzz).await
                 }

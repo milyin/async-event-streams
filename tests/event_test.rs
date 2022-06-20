@@ -23,15 +23,15 @@ fn test_send_event() {
             async move {
                 timeout(Duration::from_secs(5), async move {
                     let n1 = numbers.next().await.unwrap();
-                    assert!(*n1.as_ref() == 1);
+                    assert!(*n1 == 1);
                     drop(n1);
                     let n2 = numbers.next().await.unwrap();
-                    assert!(*n2.as_ref() == 2);
+                    assert!(*n2 == 2);
                     let no_n3 = timeout(Duration::from_millis(1), numbers.next()).await;
                     assert!(no_n3.is_err()); // Sending next event blocked by not dropped previous one
                     drop(n2);
                     let n3 = numbers.next().await.unwrap();
-                    assert!(*n3.as_ref() == 3);
+                    assert!(*n3 == 3);
                     drop(n3);
                     // earc is dropped, stream returns None
                     assert!(numbers.next().await.is_none());
@@ -71,7 +71,7 @@ fn test_send_dependent_event() {
                 let mut src = source.create_event_stream();
                 async move {
                     while let Some(en) = src.next().await {
-                        let n = *en.as_ref();
+                        let n = *en;
                         // Release source event and skip forward other task to provoke disorder if dependent events does't work
                         // Comment 'send_event' with 'en' parameter, uncomment 'send_event(n, None)' and 'drop_en' to make test fail
                         // TODO: Make this fail part of test
@@ -93,7 +93,7 @@ fn test_send_dependent_event() {
                 let mut src = source.create_event_stream();
                 async move {
                     while let Some(en) = src.next().await {
-                        let n = *en.as_ref();
+                        let n = *en;
                         // drop(en); -- see comments above
                         if n % 2 != 0 {
                             // odds.send_event(n).await;
@@ -113,7 +113,7 @@ fn test_send_dependent_event() {
                     timeout(Duration::from_secs(5), async move {
                         let mut expect = 0;
                         while let Some(en) = ns.next().await {
-                            let n = *en.as_ref();
+                            let n = *en;
                             assert!(n == expect);
                             expect += 1;
                         }

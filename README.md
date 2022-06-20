@@ -2,6 +2,9 @@
 
 Library for publishing events for multiple consumers using asynchromous streams
 
+Library provides [EventStreams<T: 'static + Send + Sync>](EventStreams) object which translates events of type ```T``` 
+to arbitrary number of [EventStream] objects, which implements standard [futures::Stream] interface
+
 ## Usage example
 
 ```
@@ -23,7 +26,7 @@ let sender_task = async move {
 let receiver_task = async move {
     let mut values = Vec::new();
     while let Some(event) = stream.next().await {
-        values.push(*event.as_ref());
+        values.push(*event)
     }
     // next() returns none when 'streams' is dropped
     assert!(values == vec![42, 451, 1984]);
