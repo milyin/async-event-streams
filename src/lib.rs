@@ -56,8 +56,8 @@
 //! P2 is reaction to C2, and both C1 and C2 comes from same ```send_event```).  But there is still no guarantee that P2 is *processed* after P1,
 //! because P1 and P2 arrives from different sources.
 //!
-//! This may be inappropriate. For example: user clicks "Apply" button and then "Close" button. "Close" button press event is processed
-//! before "Apply". "Close" handler destroys the whole dialog, "Apply" is not handled, user's data is lost.
+//! This may be inappropriate. For example: user clicks "Apply" button and then "Close" button in the dialog. But press event from "Close"
+//! button comes earlier, than from "Apply" "Close" handler destroys the dialog. "Apply" is not processed, user's data is lost.
 //!
 //! To avoid this the concept of "source" event is added. [send_event](EventStreams::send_event) and [post_event](EventStreams::post_event) have
 //! the additional optional parameter - event which caused the sent one. Reference to this 'source' event is saved inside Event wrapper of new event

@@ -1,48 +1,35 @@
 # Async Events
 
-This is a library for publishing/subcribing events for multiple consumers in asynchronous environment.
+Library for publishing events for multiple consumers using asynchromous streams
 
-Below is rough illustration of library usage. The more correct samples are in library documentation and
-examples. Also this library is used in experimental Wingows GUI libray [WAG](https://github.com/milyin/wag) 
-
-# Example
+## Usage example
 
 ```
-enum ButtonEvent { Press, Release }
+use futures::{executor::LocalPool, task::LocalSpawnExt, StreamExt};
+use async_events::EventStreams;
 
-struct Button {
-    events: EventStreams<ButtonEvent>
-}
+let mut pool = LocalPool::new();
 
-impl Button {
-    async pub fn press(&mut self) {
-        self.events.send_event(ButtonEvent::Press).await
+let streams = EventStreams::new();
+let mut stream = streams.create_event_stream();
+
+let sender_task = async move {
+    assert!(streams.count() == 1);
+    streams.send_event(42, None).await;
+    streams.send_event(451, None).await;
+    streams.send_event(1984, None).await;
+};
+
+let receiver_task = async move {
+    let mut values = Vec::new();
+    while let Some(event) = stream.next().await {
+        values.push(*event.as_ref());
     }
-    pub fn events(&self) -> EventStream<ButtonEvent> {
-        self.events.create_event_stream()
-    }
-}
-```
+    // next() returns none when 'streams' is dropped
+    assert!(values == vec![42, 451, 1984]);
+};
 
-Here is the code which changes background color when button is pressed
-
-```
-let pool = ThreadPool::builder().create().unwrap();
-let button = Button::new();
-let background = Background::new();
-
-pool.spawn({
-    let events = button.events();
-    async move {
-        // As soon as button is destroyed stream returns None
-        while let Some(event) = events.next().await {
-            // event has type Event<ButtonEvent>
-            match *event.as_ref() {
-                ButtonEvent::Pressed => background.set_color(Color::Red).await,
-                ButtonEvent::Released => background.set_color(Color::White).await,
-            }
-        }
-    }
-});
-
+pool.spawner().spawn_local(sender_task);
+pool.spawner().spawn_local(receiver_task);
+pool.run();
 ```
