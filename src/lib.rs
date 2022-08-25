@@ -1,7 +1,7 @@
 //!
 //! Library for publishing events for multiple consumers using asynchromous streams
-//! 
-//! Library provides [EventStreams<T: 'static + Send + Sync>](EventStreams) object which translates events of type ```T``` 
+//!
+//! Library provides [EventStreams<T: 'static + Send + Sync>](EventStreams) object which translates events of type ```T```
 //! to arbitrary number of [EventStream] objects, which implements standard [futures::Stream] interface
 //!
 //! # Usage sample
@@ -72,9 +72,10 @@ use std::{
     any::{Any, TypeId},
     collections::VecDeque,
     marker::PhantomData,
+    ops::Deref,
     pin::Pin,
     sync::{Arc, RwLock, Weak},
-    task::{Context, Poll, Waker}, ops::Deref,
+    task::{Context, Poll, Waker},
 };
 
 use futures::{Future, Stream};
@@ -82,7 +83,11 @@ use futures::{Future, Stream};
 /// Reference-counting container with event. Each [EventStream] instance receives clone of ```Event<T>``` referencing the same instance of ```T```.
 /// When all instances of ```Event<T>``` are dropped, the [SentEvent] future returned by [send_event](EventStreams::send_event) is released.
 ///
-/// ```Event<T>``` object is acquired from [EventStream] only.
+/// ```Event<T>``` object can't be constructed, it can be acquired from [EventStream] only. This can't be avoided because ```Event``` contains [std::task::Waker] object.
+/// This ```Waker``` allows aynchronous [EventStream::send_event] to continue when last copy of the event is dropped.
+/// More precisely: [SentEvent] object returned by ```EventStream::send_event``` checks is [EventBox] instance (shared by all ```Event```s) destroyed
+/// and the waker notifies ```SentEvent``` when to do the poll. Thus ```EventObject``` and so ```Event<T>``` is inseparable from it's ```EventStream```
+/// and can't be put to another stream as is.
 pub struct Event<EVT: 'static + Send + Sync> {
     event_box: Arc<EventBox>,
     _phantom: PhantomData<EVT>,
@@ -204,6 +209,9 @@ impl EventBoxQueue {
     fn get_event(&mut self) -> Option<Arc<EventBox>> {
         self.events.pop_front()
     }
+    fn clear(&mut self) {
+        self.events.clear()
+    }
 }
 
 impl Drop for EventBoxQueue {
@@ -245,6 +253,12 @@ impl EventBoxQueues {
             .for_each(|event_queue| {
                 event_queue.write().unwrap().put_event(event.clone());
             });
+    }
+    fn clear(&mut self) {
+        self.0
+            .iter()
+            .filter_map(|event_queue| event_queue.upgrade())
+            .for_each(|event_queue| event_queue.write().unwrap().clear())
     }
 }
 
@@ -307,6 +321,11 @@ impl<EVT: Send + Sync + 'static> EventStreams<EVT> {
         let weak_event_queue = Arc::downgrade(&mut (event_queue.clone()));
         queues.add_queue(weak_event_queue);
         EventStream::new(event_queue)
+    }
+
+    /// Remove all pending events for all subscribers
+    pub fn clear(&self) {
+        self.queues.write().unwrap().clear()
     }
 }
 
