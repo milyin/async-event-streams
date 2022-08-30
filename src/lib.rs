@@ -67,12 +67,19 @@
 //! and therefore source ```send_event``` is blocked until all derived events are dropped. So sending second click event in example above is delayed until
 //! "Apply" handler, which holds fisrst click event, finishes.
 //!
+//! # Event sources, sinks and pipes
+//!
+//! There are typical repeating operations with event streams exists. Object may generate events of different types ([EventSource])
+//! and react to events ([EventSink]). Connecting event source to event sink is performed by spawing asynchronous task (see ```receiver_task``` in sample above).
+//!
 
 mod event;
 mod event_queue;
 mod event_stream;
 mod event_streams;
+mod pipes;
 
 pub use event::{Event, EventBox};
 pub use event_stream::EventStream;
 pub use event_streams::EventStreams;
+pub use pipes::{spawn_event_pipe, EventSink, EventSinkExt, EventSource};
