@@ -10,7 +10,7 @@ use futures::Stream;
 use crate::{event::Event, event_queue::EventBoxQueue};
 
 /// Asychronous stream of events of specified type. The stream's ```next()``` method returns ```Some(Event<EVT>)``` while
-/// source object [EventStreams] is alive and ```None``` when it is destroyed.
+/// source object [crate::EventStreams] is alive and ```None``` when it is destroyed.
 pub struct EventStream<EVT: Send + Sync + 'static> {
     event_queue: Arc<RwLock<EventBoxQueue>>,
     _phantom: PhantomData<EVT>,

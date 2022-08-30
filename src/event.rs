@@ -6,12 +6,12 @@ use std::{
     task::Waker,
 };
 
-/// Reference-counting container with event. Each [EventStream] instance receives clone of ```Event<T>``` referencing the same instance of ```T```.
-/// When all instances of ```Event<T>``` are dropped, the [SentEvent] future returned by [send_event](EventStreams::send_event) is released.
+/// Reference-counting container with event. Each [crate::EventStream] instance receives clone of ```Event<T>``` referencing the same instance of ```T```.
+/// When all instances of ```Event<T>``` are dropped, the [crate::SentEvent] future returned by [send_event](crate::EventStreams::send_event) is released.
 ///
-/// ```Event<T>``` object can't be constructed, it can be acquired from [EventStream] only. This can't be avoided because ```Event``` contains [std::task::Waker] object.
-/// This ```Waker``` allows aynchronous [EventStream::send_event] to continue when last copy of the event is dropped.
-/// More precisely: [SentEvent] object returned by ```EventStream::send_event``` checks is [EventBox] instance (shared by all ```Event```s) destroyed
+/// ```Event<T>``` object can't be constructed, it can be acquired from ```EventStream``` only. This can't be avoided because ```Event``` contains [std::task::Waker] object.
+/// This ```Waker``` pushes aynchronous ```EventStream::send_event``` to continue when last copy of the event is dropped.
+/// More precisely: ```SentEvent``` object returned by ```EventStream::send_event``` checks is [EventBox] instance (shared by all ```Event```s) destroyed
 /// and the waker notifies ```SentEvent``` when to do the poll. Thus ```EventObject``` and so ```Event<T>``` is inseparable from it's ```EventStream```
 /// and can't be put to another stream as is.
 pub struct Event<EVT: 'static + Send + Sync> {

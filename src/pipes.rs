@@ -2,7 +2,10 @@ use std::{borrow::Cow, sync::Arc};
 
 use async_std::stream::StreamExt;
 use async_trait::async_trait;
-use futures::task::{Spawn, SpawnError, SpawnExt};
+use futures::{
+    future::RemoteHandle,
+    task::{Spawn, SpawnError, SpawnExt},
+};
 
 use crate::{EventBox, EventStream};
 
@@ -50,16 +53,18 @@ pub trait EventSink<EVT: Send + Sync + 'static> {
 #[async_trait]
 pub trait EventSinkExt<EVT: Send + Sync + 'static + ToOwned> {
     type Error;
-    async fn on_event(
-        &self,
-        event: Cow<EVT>,
+    async fn on_event<'a>(
+        &'a self,
+        event: Cow<'a, EVT>,
         source: Option<Arc<EventBox>>,
     ) -> Result<(), Self::Error>;
 }
 
 #[async_trait]
-impl<EVT: Send + Sync + ToOwned<Owned = EVT> + 'static, T: EventSinkExt<EVT> + Send + Sync>
-    EventSink<EVT> for T
+impl<
+        EVT: Send + Sync + ToOwned<Owned = EVT> + 'static,
+        T: EventSinkExt<EVT> + Send + Sync + 'static,
+    > EventSink<EVT> for T
 {
     type Error = T::Error;
     async fn on_event_owned(
@@ -78,9 +83,9 @@ impl<EVT: Send + Sync + ToOwned<Owned = EVT> + 'static, T: EventSinkExt<EVT> + S
     }
 }
 
-/// Connect [EventSource] to [EventSink]: run asynchronous task which reads events from source and 
-/// 
-/// 
+/// Connect [EventSource] to [EventSink]: run asynchronous task which reads events from source and
+/// calls [EventSink::on_event_ref] on sink object. Source may provide events for multiple readers, so
+/// only references to events are available from it.
 pub fn spawn_event_pipe<
     EVT: Send + Sync + Unpin + 'static,
     E,
@@ -88,8 +93,8 @@ pub fn spawn_event_pipe<
     SOURCE: EventSource<EVT> + 'static,
     SINK: EventSink<EVT, Error = E> + Send + Sync + 'static,
 >(
-    spawner: SPAWNER,
-    source: SOURCE,
+    spawner: &SPAWNER,
+    source: &SOURCE,
     sink: SINK,
     error_handler: impl FnOnce(E) + Send + 'static,
 ) -> Result<(), SpawnError> {
@@ -103,6 +108,35 @@ pub fn spawn_event_pipe<
         Result::<(), E>::Ok(())
     };
     spawner.spawn(async move {
+        if let Err(e) = process_events.await {
+            error_handler(e)
+        }
+    })
+}
+
+/// Same as [spawn_event_pipe], but also returns handle to task spawned by [futures::task::SpawnExt::spawn_with_handle]
+pub fn spawn_event_pipe_with_handle<
+    EVT: Send + Sync + Unpin + 'static,
+    E,
+    SPAWNER: Spawn,
+    SOURCE: EventSource<EVT> + 'static,
+    SINK: EventSink<EVT, Error = E> + Send + Sync + 'static,
+>(
+    spawner: &SPAWNER,
+    source: &SOURCE,
+    sink: SINK,
+    error_handler: impl FnOnce(E) + Send + 'static,
+) -> Result<RemoteHandle<()>, SpawnError> {
+    let mut source = source.event_stream();
+    let process_events = async move {
+        while let Some(event) = source.next().await {
+            let eventref = event.clone();
+            let eventref = &*eventref;
+            sink.on_event_ref(eventref, event.into()).await?;
+        }
+        Result::<(), E>::Ok(())
+    };
+    spawner.spawn_with_handle(async move {
         if let Err(e) = process_events.await {
             error_handler(e)
         }

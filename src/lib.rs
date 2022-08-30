@@ -69,8 +69,9 @@
 //!
 //! # Event sources, sinks and pipes
 //!
-//! There are typical repeating operations with event streams exists. Object may generate events of different types ([EventSource])
-//! and react to events ([EventSink]). Connecting event source to event sink is performed by spawing asynchronous task (see ```receiver_task``` in sample above).
+//! There are typical repeating operations with event streams. Object may generate events of different types ([EventSource])
+//! and react to events ([EventSink]). Connecting event source to event sink can be performed by spawing asynchronous task with
+//! [spawn_event_pipe]
 //!
 
 mod event;
@@ -81,5 +82,7 @@ mod pipes;
 
 pub use event::{Event, EventBox};
 pub use event_stream::EventStream;
-pub use event_streams::EventStreams;
-pub use pipes::{spawn_event_pipe, EventSink, EventSinkExt, EventSource};
+pub use event_streams::{EventStreams, SentEvent};
+pub use pipes::{
+    spawn_event_pipe, spawn_event_pipe_with_handle, EventSink, EventSinkExt, EventSource,
+};

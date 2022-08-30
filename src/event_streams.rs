@@ -77,7 +77,7 @@ impl<EVT: Send + Sync + 'static> EventStreams<EVT> {
     }
 }
 
-/// Future returned by [send_event](EventStreams::send_event). ```await``` on it blocks until all instances of [Event] sent to [EventStream]
+/// Future returned by [send_event](EventStreams::send_event). ```await``` on it blocks until all instances of [crate::Event] sent to [EventStream]
 /// by this ```send_event``` are dropped
 pub struct SentEvent(Weak<EventBox>);
 
