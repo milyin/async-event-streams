@@ -1,4 +1,4 @@
-use std::{borrow::Cow, sync::Arc};
+use std::{borrow::Cow, marker::PhantomData, ops::Deref, sync::Arc};
 
 use async_std::stream::StreamExt;
 use async_trait::async_trait;
@@ -51,20 +51,28 @@ pub trait EventSink<EVT: Send + Sync + 'static> {
 /// If the event object implements [ToOwned] trait (note that all [Clone] object implements [ToOwned]), [EventSink] interface
 /// can be implemented with only one event handler with [Cow] parameter, instead of separate handlers for owned and borrowed cases
 #[async_trait]
-pub trait EventSinkExt<EVT: Send + Sync + 'static + ToOwned> {
+pub trait EventSinkExt<EVT: Send + Sync + 'static + ToOwned<Owned = EVT>> {
     type Error;
     async fn on_event<'a>(
         &'a self,
         event: Cow<'a, EVT>,
         source: Option<Arc<EventBox>>,
     ) -> Result<(), Self::Error>;
+    fn into_event_sink(self) -> IntoEventSink<EVT, Self>
+    where
+        Self: Sized + Send + Sync,
+    {
+        IntoEventSink(self, PhantomData::default())
+    }
 }
+pub struct IntoEventSink<
+    EVT: Send + Sync + ToOwned<Owned = EVT> + 'static,
+    T: EventSinkExt<EVT> + Send + Sync,
+>(T, PhantomData<EVT>);
 
 #[async_trait]
-impl<
-        EVT: Send + Sync + ToOwned<Owned = EVT> + 'static,
-        T: EventSinkExt<EVT> + Send + Sync + 'static,
-    > EventSink<EVT> for T
+impl<EVT: Send + Sync + ToOwned<Owned = EVT> + 'static, T: EventSinkExt<EVT> + Send + Sync>
+    EventSink<EVT> for IntoEventSink<EVT, T>
 {
     type Error = T::Error;
     async fn on_event_owned(
@@ -72,14 +80,68 @@ impl<
         event: EVT,
         source: Option<Arc<EventBox>>,
     ) -> Result<(), Self::Error> {
-        T::on_event(&self, Cow::Owned(event), source).await
+        T::on_event(&self.0, Cow::Owned(event), source).await
     }
     async fn on_event_ref(
         &self,
         event: &EVT,
         source: Option<Arc<EventBox>>,
     ) -> Result<(), Self::Error> {
-        T::on_event(&self, Cow::Borrowed(event), source).await
+        T::on_event(&self.0, Cow::Borrowed(event), source).await
+    }
+}
+
+pub struct IntoEventSinkDeref<
+    EVT: Send + Sync + ToOwned<Owned = EVT> + 'static,
+    T: EventSinkExt<EVT> + Send + Sync,
+    Q: Deref<Target = T>,
+>(Q, PhantomData<EVT>);
+
+pub trait _IntoEventSinkDeref<
+    EVT: Send + Sync + 'static + ToOwned<Owned = EVT>,
+    T: EventSinkExt<EVT> + Send + Sync,
+>
+{
+    fn into_event_sink_deref(self) -> IntoEventSinkDeref<EVT, T, Self>
+    where
+        Self: Sized + Send + Sync + Deref<Target = T>;
+}
+
+impl<
+        EVT: Send + Sync + ToOwned<Owned = EVT> + 'static,
+        T: EventSinkExt<EVT> + Send + Sync,
+        Q: Deref<Target = T>,
+    > _IntoEventSinkDeref<EVT, T> for Q
+{
+    fn into_event_sink_deref(self) -> IntoEventSinkDeref<EVT, T, Self>
+    where
+        Self: Sized,
+    {
+        IntoEventSinkDeref(self, PhantomData::default())
+    }
+}
+
+#[async_trait]
+impl<
+        EVT: Send + Sync + ToOwned<Owned = EVT> + 'static,
+        T: EventSinkExt<EVT> + Send + Sync,
+        Q: Deref<Target = T> + Send + Sync,
+    > EventSink<EVT> for IntoEventSinkDeref<EVT, T, Q>
+{
+    type Error = T::Error;
+    async fn on_event_owned(
+        &self,
+        event: EVT,
+        source: Option<Arc<EventBox>>,
+    ) -> Result<(), Self::Error> {
+        T::on_event(&self.0, Cow::Owned(event), source).await
+    }
+    async fn on_event_ref(
+        &self,
+        event: &EVT,
+        source: Option<Arc<EventBox>>,
+    ) -> Result<(), Self::Error> {
+        T::on_event(&self.0, Cow::Borrowed(event), source).await
     }
 }
 
@@ -90,7 +152,7 @@ pub fn spawn_event_pipe<
     EVT: Send + Sync + Unpin + 'static,
     E,
     SPAWNER: Spawn,
-    SOURCE: EventSource<EVT> + 'static,
+    SOURCE: EventSource<EVT>,
     SINK: EventSink<EVT, Error = E> + Send + Sync + 'static,
 >(
     spawner: &SPAWNER,

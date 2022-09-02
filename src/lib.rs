@@ -85,4 +85,5 @@ pub use event_stream::EventStream;
 pub use event_streams::{EventStreams, SentEvent};
 pub use pipes::{
     spawn_event_pipe, spawn_event_pipe_with_handle, EventSink, EventSinkExt, EventSource,
+    IntoEventSink, IntoEventSinkDeref, _IntoEventSinkDeref,
 };
