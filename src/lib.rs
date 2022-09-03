@@ -79,11 +79,10 @@ mod event_queue;
 mod event_stream;
 mod event_streams;
 mod pipes;
+mod pipes_ext;
 
 pub use event::{Event, EventBox};
 pub use event_stream::EventStream;
 pub use event_streams::{EventStreams, SentEvent};
-pub use pipes::{
-    spawn_event_pipe, spawn_event_pipe_with_handle, EventSink, EventSinkExt, EventSource,
-    IntoEventSink, IntoEventSinkDeref, _IntoEventSinkDeref,
-};
+pub use pipes::{spawn_event_pipe, spawn_event_pipe_with_handle, EventSink, EventSource};
+pub use pipes_ext::{EventSinkExt, IntoEventSink, IntoEventSinkDeref, ToIntoEventSinkDeref};
