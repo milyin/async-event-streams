@@ -4,7 +4,7 @@ use std::{
 };
 
 use async_event_streams::{
-    spawn_event_pipe, spawn_event_pipe_with_handle, EventBox, EventSinkExt, EventSource,
+    spawn_event_pipe, spawn_event_pipe_with_handle, EventBox, EventSink, EventSinkExt, EventSource,
     EventStream, EventStreams, ToIntoEventSinkDeref,
 };
 use async_std::sync::RwLock;
@@ -31,14 +31,22 @@ struct Sink {
 }
 
 #[async_trait]
-impl EventSinkExt<FizzBuzz> for Sink {
+impl EventSink<FizzBuzz> for Sink {
     type Error = ();
-    async fn on_event<'a>(
-        &'a self,
-        event: Cow<'a, FizzBuzz>,
+    async fn on_event_ref(
+        &self,
+        event: &FizzBuzz,
         _: Option<Arc<EventBox>>,
     ) -> Result<(), Self::Error> {
         self.values.write().await.push(*event);
+        Ok(())
+    }
+    async fn on_event_owned(
+        &self,
+        event: FizzBuzz,
+        _: Option<Arc<EventBox>>,
+    ) -> Result<(), Self::Error> {
+        self.values.write().await.push(event);
         Ok(())
     }
 }
@@ -164,34 +172,14 @@ async fn fizz_buzz_test(spawner: impl Spawn, sink: Arc<Sink>, count: usize) {
     )
     .unwrap();
 
-    let task_fizz = spawn_event_pipe_with_handle(
-        &spawner,
-        &*fizz,
-        sink.clone().into_event_sink(),
-        |_| panic!(),
-    )
-    .unwrap();
-    let task_buzz = spawn_event_pipe_with_handle(
-        &spawner,
-        &*buzz,
-        sink.clone().into_event_sink(),
-        |_| panic!(),
-    )
-    .unwrap();
-    let task_fizzbuzz = spawn_event_pipe_with_handle(
-        &spawner,
-        &*fizzbuzz,
-        sink.clone().into_event_sink(),
-        |_| panic!(),
-    )
-    .unwrap();
-    let task_nums = spawn_event_pipe_with_handle(
-        &spawner,
-        &*number,
-        sink.clone().into_event_sink(),
-        |_| panic!(),
-    )
-    .unwrap();
+    let task_fizz =
+        spawn_event_pipe_with_handle(&spawner, &*fizz, sink.clone(), |_| panic!()).unwrap();
+    let task_buzz =
+        spawn_event_pipe_with_handle(&spawner, &*buzz, sink.clone(), |_| panic!()).unwrap();
+    let task_fizzbuzz =
+        spawn_event_pipe_with_handle(&spawner, &*fizzbuzz, sink.clone(), |_| panic!()).unwrap();
+    let task_nums =
+        spawn_event_pipe_with_handle(&spawner, &*number, sink.clone(), |_| panic!()).unwrap();
 
     let task_generator = spawner
         .spawn_with_handle(async move {

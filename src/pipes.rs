@@ -47,6 +47,25 @@ pub trait EventSink<EVT: Send + Sync + 'static> {
     ) -> Result<(), Self::Error>;
 }
 
+#[async_trait]
+impl<EVT: Send + Sync + 'static, T: EventSink<EVT> + Send + Sync> EventSink<EVT> for Arc<T> {
+    type Error = T::Error;
+    async fn on_event_owned(
+        &self,
+        event: EVT,
+        source: Option<Arc<EventBox>>,
+    ) -> Result<(), Self::Error> {
+        (**self).on_event_owned(event, source).await
+    }
+    async fn on_event_ref(
+        &self,
+        event: &EVT,
+        source: Option<Arc<EventBox>>,
+    ) -> Result<(), Self::Error> {
+        (**self).on_event_ref(event, source).await
+    }
+}
+
 /// Connect [EventSource] to [EventSink]: run asynchronous task which reads events from source and
 /// calls [EventSink::on_event_ref] on sink object. Source may provide events for multiple readers, so
 /// only references to events are available from it.
