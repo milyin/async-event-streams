@@ -42,7 +42,7 @@
 //! Events comes from each stream exactly in order as they being sent. Streams are independent from each other, so if event is put into streams,
 //! nothing can stop receiver to read it.
 //!
-//! Since reveivers works in asynchronous environment it's possible that streams are emptied unevenly. I.e. if events [1,2,3,4,5] put to [EventStreams],
+//! Since reveivers works in asynchronous environment it's possible that streams are emptied unevenly. I.e. if events 1,2,3,4,5 put to [EventStreams],
 //! one [EventStream] subscriber could process all 5 events while another is still waiting for first.
 //!
 //! Sometimes it's undesirable. So the mechanism to guarantee that all events '1' are handled before sending event '2' is implemented.

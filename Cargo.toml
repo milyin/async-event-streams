@@ -19,4 +19,4 @@ features = ["thread-pool"]
 
 [dev-dependencies]
 async-std = "1.11.0"
-async_event_streams_derive = { path = "async-event-streams-derive" }
+# async_event_streams_derive = "0.1.2"
