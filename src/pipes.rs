@@ -1,4 +1,4 @@
-use async_std::stream::StreamExt;
+use async_std::{stream::StreamExt, sync::RwLock};
 use async_trait::async_trait;
 use futures::{
     future::RemoteHandle,
@@ -25,6 +25,12 @@ use crate::{EventBox, EventStream};
 /// ```
 pub trait EventSource<EVT: Send + Sync + 'static> {
     fn event_stream(&self) -> EventStream<EVT>;
+}
+
+impl<EVT: Send + Sync + 'static, T: EventSource<EVT>> EventSource<EVT> for Arc<T> {
+    fn event_stream(&self) -> EventStream<EVT> {
+        (**self).event_stream()
+    }
 }
 
 /// Standartized interface for object reacting to events of specific type. The trait have two methods: ```on_event_owned``` which accepts
@@ -63,6 +69,25 @@ impl<EVT: Send + Sync + 'static, T: EventSink<EVT> + Send + Sync> EventSink<EVT>
         source: Option<Arc<EventBox>>,
     ) -> Result<(), Self::Error> {
         (**self).on_event_ref(event, source).await
+    }
+}
+
+#[async_trait]
+impl<EVT: Send + Sync + 'static, T: EventSink<EVT> + Send + Sync> EventSink<EVT> for RwLock<T> {
+    type Error = T::Error;
+    async fn on_event_owned(
+        &self,
+        event: EVT,
+        source: Option<Arc<EventBox>>,
+    ) -> Result<(), Self::Error> {
+        self.read().await.on_event_owned(event, source).await
+    }
+    async fn on_event_ref(
+        &self,
+        event: &EVT,
+        source: Option<Arc<EventBox>>,
+    ) -> Result<(), Self::Error> {
+        self.read().await.on_event_ref(event, source).await
     }
 }
 
