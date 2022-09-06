@@ -3,9 +3,11 @@ use std::{
     sync::{mpsc::channel, Arc},
 };
 
+use async_event_streams_derive::EventSink;
+
 use async_event_streams::{
     spawn_event_pipe, spawn_event_pipe_with_handle, EventBox, EventSink, EventSinkExt, EventSource,
-    EventStream, EventStreams, ToIntoEventSinkDeref,
+    EventStream, EventStreams,
 };
 use async_std::sync::RwLock;
 use async_trait::async_trait;
@@ -26,28 +28,35 @@ enum FizzBuzz {
 #[derive(Copy, Clone, PartialEq, PartialOrd, Debug)]
 struct N(usize);
 
+#[derive(EventSink)]
+#[event_sink(event=FizzBuzz)]
 struct Sink {
     values: RwLock<Vec<FizzBuzz>>,
 }
 
 #[async_trait]
-impl EventSink<FizzBuzz> for Sink {
+impl EventSinkExt<FizzBuzz> for Sink {
     type Error = ();
-    async fn on_event_ref(
-        &self,
-        event: &FizzBuzz,
+    async fn on_event<'a>(
+        &'a self,
+        event: Cow<'a, FizzBuzz>,
         _: Option<Arc<EventBox>>,
     ) -> Result<(), Self::Error> {
         self.values.write().await.push(*event);
         Ok(())
     }
-    async fn on_event_owned(
-        &self,
-        event: FizzBuzz,
-        _: Option<Arc<EventBox>>,
-    ) -> Result<(), Self::Error> {
-        self.values.write().await.push(event);
-        Ok(())
+}
+
+// Just to demostrate that multiple implemetations of EventSink is possible and
+// EventSink and EventSinkExt can be mixed
+#[async_trait]
+impl EventSink<N> for Sink {
+    type Error = ();
+    async fn on_event_owned(&self, _: N, _: Option<Arc<EventBox>>) -> Result<(), Self::Error> {
+        todo!()
+    }
+    async fn on_event_ref(&self, _: &N, _: Option<Arc<EventBox>>) -> Result<(), Self::Error> {
+        todo!()
     }
 }
 
@@ -94,6 +103,8 @@ impl EventSource<N> for Generator {
     }
 }
 
+#[derive(EventSink)]
+#[event_sink(event=N)]
 struct Filter {
     mode: FizzBuzz,
     stream: EventStreams<FizzBuzz>,
@@ -137,40 +148,16 @@ impl EventSinkExt<N> for Filter {
 }
 
 async fn fizz_buzz_test(spawner: impl Spawn, sink: Arc<Sink>, count: usize) {
-    let generator = Arc::new(Generator::new());
+    let generator = Generator::new();
     let fizz = Arc::new(Filter::new(FizzBuzz::Fizz));
     let buzz = Arc::new(Filter::new(FizzBuzz::Buzz));
     let fizzbuzz = Arc::new(Filter::new(FizzBuzz::FizzBuzz));
     let number = Arc::new(Filter::new(FizzBuzz::Number));
 
-    spawn_event_pipe(
-        &spawner,
-        &*generator,
-        fizz.clone().into_event_sink(),
-        |_| panic!(),
-    )
-    .unwrap();
-    spawn_event_pipe(
-        &spawner,
-        &*generator,
-        buzz.clone().into_event_sink(),
-        |_| panic!(),
-    )
-    .unwrap();
-    spawn_event_pipe(
-        &spawner,
-        &*generator,
-        fizzbuzz.clone().into_event_sink(),
-        |_| panic!(),
-    )
-    .unwrap();
-    spawn_event_pipe(
-        &spawner,
-        &*generator,
-        number.clone().into_event_sink(),
-        |_| panic!(),
-    )
-    .unwrap();
+    spawn_event_pipe(&spawner, &generator, fizz.clone(), |_| panic!()).unwrap();
+    spawn_event_pipe(&spawner, &generator, buzz.clone(), |_| panic!()).unwrap();
+    spawn_event_pipe(&spawner, &generator, fizzbuzz.clone(), |_| panic!()).unwrap();
+    spawn_event_pipe(&spawner, &generator, number.clone(), |_| panic!()).unwrap();
 
     let task_fizz =
         spawn_event_pipe_with_handle(&spawner, &*fizz, sink.clone(), |_| panic!()).unwrap();

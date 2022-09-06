@@ -4,7 +4,7 @@ use futures::{
     future::RemoteHandle,
     task::{Spawn, SpawnError, SpawnExt},
 };
-use std::sync::Arc;
+use std::{borrow::Cow, sync::Arc};
 
 use crate::{EventBox, EventStream};
 
@@ -33,7 +33,7 @@ pub trait EventSource<EVT: Send + Sync + 'static> {
 ///
 /// See also [crate::EventSinkExt] trait which allows to implement only one event handler by using [std::borrow::Cow]
 #[async_trait]
-pub trait EventSink<EVT: Send + Sync + 'static> {
+pub trait EventSink<EVT: Send + Sync + 'static>: Send + Sync {
     type Error;
     async fn on_event_owned(
         &self,
@@ -124,4 +124,41 @@ pub fn spawn_event_pipe_with_handle<
             error_handler(e)
         }
     })
+}
+/// If the event object implements [ToOwned] trait (note that all [Clone] object implements it), [EventSink] implementation
+/// can be simplified by implementing helper [EventSinkExt] with only one event handler accepting [std::borrow::Cow] parameter,
+/// instead of separate handlers for owned and borrowed cases
+///
+/// If structure implements ```EventSinkExt``` the [EventSink] trait can be derived for it:
+/// ```
+/// use std::sync::Arc;
+/// use async_trait::async_trait;
+/// use std::borrow::Cow;
+/// use async_event_streams::{EventBox, EventSink, EventSinkExt};
+/// use async_event_streams_derive::EventSink;
+///
+/// #[derive(EventSink)]
+/// #[event_sink(event=Event)]
+/// struct Sink;
+///
+/// #[derive(Clone)]
+/// struct Event;
+///
+/// #[async_trait]
+/// impl EventSinkExt<Event> for Sink {
+///     type Error = ();
+///     async fn on_event<'a>(&'a self, event: Cow<'a, Event>, source: Option<Arc<EventBox>>) -> Result<(), Self::Error> {
+///         todo!()
+///     }
+///}
+/// ```
+///
+#[async_trait]
+pub trait EventSinkExt<EVT: Send + Sync + 'static + ToOwned<Owned = EVT>> {
+    type Error;
+    async fn on_event<'a>(
+        &'a self,
+        event: Cow<'a, EVT>,
+        source: Option<Arc<EventBox>>,
+    ) -> Result<(), Self::Error>;
 }

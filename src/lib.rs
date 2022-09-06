@@ -39,13 +39,17 @@
 //! # Event processing order
 //!
 //! When event is put to [EventStreams] it becomes immediately available for all [EventStream] objects, created by this ```EventStreams```.
-//! Events comes from stream exactly in order as they being sent. But between streams this order is not guaranteed.
-//! Though sometimes it is necessary to ensure that events are handled in order globally. I.e. for async tasks A and B the events E1,E2,E3 should be processed
-//! in order A(E1), B(E1), B(E2), A(E2), B(E3), A(E3), but not in order A(E1), A(E2), A(E3), B(E1), B(E2), B(E3).
+//! Events comes from each stream exactly in order as they being sent. Streams are independent from each other, so if event is put into streams,
+//! nothing can stop receiver to read it.
+//!
+//! Since reveivers works in asynchronous environment it's possible that streams are emptied unevenly. I.e. if events [1,2,3,4,5] put to [EventStreams],
+//! one [EventStream] subscriber could process all 5 events while another is still waiting for first.
+//!
+//! Sometimes it's undesirable. So the mechanism to guarantee that all events '1' are handled before sending event '2' is implemented.
 //!
 //! To achieve this the [send_event](EventStreams::send_event) function returns future [SentEvent]. Each [EventStream] instance receives clone
-//! of [Event<T>](Event) object. When all these clones are dropped the ```SentEvent``` future is released. This guarantees that E2 is sent only
-//! when E1 has been processed by all subscribers.
+//! of [Event<T>](Event) object. When all these clones are dropped the ```SentEvent``` future is released. This guarantees that '2' is sent only
+//! when '1' has been processed by all subscribers.
 //!
 //! If such blocking is not necessary, the [post_event](EventStreams::post_event) can be used instead.
 //!
@@ -57,7 +61,7 @@
 //! For example consider two buttons A and B. Click C1 causes button A send press
 //! P1, click C2 causes button B send press P2. It's guaranteed that P2 is *sent* after P1 (because P1 is reaction to C1,
 //! P2 is reaction to C2, and both C1 and C2 comes from same ```send_event```).  But there is still no guarantee that P2 is *processed* after P1,
-//! because P1 and P2 arrives from different sources.
+//! because P1 and P2 are sent by different ```send_event```s so the blocking mechanism decribed above doesn't help.
 //!
 //! This may be inappropriate. For example: user clicks "Apply" button and then "Close" button in the dialog. But press event from "Close"
 //! button comes earlier than from "Apply". "Close" handler destroys the dialog, "Apply" is not processed, user's data is lost.
@@ -79,10 +83,10 @@ mod event_queue;
 mod event_stream;
 mod event_streams;
 mod pipes;
-mod pipes_ext;
 
 pub use event::{Event, EventBox};
 pub use event_stream::EventStream;
 pub use event_streams::{EventStreams, SentEvent};
-pub use pipes::{spawn_event_pipe, spawn_event_pipe_with_handle, EventSink, EventSource};
-pub use pipes_ext::{EventSinkExt, IntoEventSink, IntoEventSinkDeref, ToIntoEventSinkDeref};
+pub use pipes::{
+    spawn_event_pipe, spawn_event_pipe_with_handle, EventSink, EventSinkExt, EventSource,
+};
