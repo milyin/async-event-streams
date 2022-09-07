@@ -39,37 +39,38 @@
 //! # Event processing order
 //!
 //! When event is put to [EventStreams] it becomes immediately available for all [EventStream] objects, created by this ```EventStreams```.
-//! Events comes from each stream exactly in order as they being sent. Streams are independent from each other, so if event is put into streams,
-//! nothing can stop receiver to read it.
+//! Events comes from each stream exactly in order as they being sent.
 //!
-//! Since reveivers works in asynchronous environment it's possible that streams are emptied unevenly. I.e. if events 1,2,3,4,5 put to [EventStreams],
+//! Since reveivers work in asynchronous environment it's possible that streams are emptied unevenly. I.e. if events 1,2,3,4,5 put to [EventStreams],
 //! one [EventStream] subscriber could process all 5 events while another is still waiting for first.
 //!
 //! Sometimes it's undesirable. So the mechanism to guarantee that all events '1' are handled before sending event '2' is implemented.
 //!
 //! To achieve this the [send_event](EventStreams::send_event) function returns future [SentEvent]. Each [EventStream] instance receives clone
-//! of [Event<T>](Event) object. When all these clones are dropped the ```SentEvent``` future is released. This guarantees that '2' is sent only
-//! when '1' has been processed by all subscribers.
+//! of [Event\<T\>](Event) object which all wraps the same instance of event. Subscribers get these ```Event``` instances and
+//! may hold them as long as they need it. ```SentEvent``` future is released only when all instances of this
+//! ```Event``` are dropped. This guarantees that next event is sent only when previous one has been processed by all subscribers.
 //!
 //! If such blocking is not necessary, the [post_event](EventStreams::post_event) can be used instead.
 //!
 //! # Dependent Events
 //!
-//! Received events may cause firing new events. For example button's mouse click handler is sending button press events.
-//! It may be important to guarantee that button click events are not handled in order different than mouse clicks order.
+//! Received events may cause firing new events. For example mouse button click handler is sending mouse click events. These clicks causes
+//! GUI buttons to send button press events. It may be important to guarantee that button press events are not handled in order different
+//! than mouse clicks order.
 //!
 //! For example consider two buttons A and B. Click C1 causes button A send press
 //! P1, click C2 causes button B send press P2. It's guaranteed that P2 is *sent* after P1 (because P1 is reaction to C1,
 //! P2 is reaction to C2, and both C1 and C2 comes from same ```send_event```).  But there is still no guarantee that P2 is *processed* after P1,
 //! because P1 and P2 are sent by different ```send_event```s so the blocking mechanism decribed above doesn't help.
 //!
-//! This may be inappropriate. For example: user clicks "Apply" button and then "Close" button in the dialog. But press event from "Close"
+//! This may cause problems. For example: user clicks "Apply" button and then "Close" button in the dialog. But press event from "Close"
 //! button comes earlier than from "Apply". "Close" handler destroys the dialog, "Apply" is not processed, user's data is lost.
 //!
 //! To avoid this the [send_event](EventStreams::send_event) and [post_event](EventStreams::post_event) have
-//! the additional optional parameter ```source``` - event which was the cause of the sent one. Reference to this 'source' event is saved inside [Event] wrapper of new event
-//! and therefore source ```send_event``` is blocked until all derived events are dropped. So sending second click event in example above is delayed until
-//! "Apply" handler, which holds fisrst click event, finishes.
+//! the additional optional parameter ```source``` - event which was the cause of the sent one. Reference to this 'source' event is saved
+//! inside [Event] wrapper of new event and therefore source ```send_event``` is blocked until all derived events are dropped.
+//! So sending second click event in example above is delayed until "Apply" handler (which holds first click event) finishes.
 //!
 //! # Event sources, sinks and pipes
 //!

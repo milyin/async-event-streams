@@ -9,7 +9,9 @@ use std::{borrow::Cow, sync::Arc};
 use crate::{EventBox, EventStream};
 
 ///
-/// Standartized interface for structures providing sream of events of specified type. Typically this trait is implemented like this:
+/// Standartized interface for structures providing sream of events of specified type.
+///
+/// Typically this trait is implemented like this:
 ///
 /// ```
 /// # use async_event_streams::{EventStream, EventStreams, EventSource};
